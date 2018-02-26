@@ -3,8 +3,19 @@ const bodyParser = require('body-parser');
 const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
 const session = require('express-session');
+const exphbs  = require('express-handlebars');
+const bcrypt = require('bcrypt');
+const pgp = require('pg-promise')(); 
 const app = express();
+const saltRounds = 10;
 
+const db = pgp({
+    host: 'localhost',
+    port: 5432,
+    database: process.env.DATABASE,
+    user: process.env.USERNAME,
+    password: process.env.PASSWORD
+});
 // create temporary storage for login data
 const storage = {
   1: {
@@ -18,15 +29,21 @@ const storage = {
     password: 'secret'
   }
 };
+let counter = 3;
 
 // helper function to get user by username
 function getUserByUsername(username){
-  return Object.values(storage).find( function(user){
-    return user.username === username;
-  });
+  // return Object.values(storage).find( function(user){
+  //   return user.username === username;
+  // });
+  return db.one(`SELECT * from userdata where userdata.email = $1`, [username]);
 }
 
+app.engine('handlebars', exphbs({defaultLayout: 'main'}));
+app.set('view engine', 'handlebars');
+app.use(express.static('static')) 
 app.use('/static', express.static('static'));
+app.use(bodyParser.urlencoded({extended: true}));
 app.use(bodyParser.json());
 
 // configure user session
@@ -51,7 +68,7 @@ passport.deserializeUser(function(id, done) {
 // that is use locally stored credentials
 passport.use(new LocalStrategy(
   function(username, password, done) {
-    const user = getUserByUsername(username);
+    getUserByUsername(username).then();
     if (!user) return done(null, false);
     if (user.password != password) return done(null, false);
     return done(null, user);
@@ -82,6 +99,34 @@ app.get('/profile', isLoggedIn, function(req, res){
   res.json({user:req.user});
 });
 
+
+app.get('/register', (req, res) => {
+  res.render('register')
+});
+
+app.post('/register', (req, res) => {
+   // console.log(req.body)
+   const {email,password} = req.body
+   // console.log(email,password);
+    bcrypt.hash(password,saltRounds,function(err,hash){
+      
+    db.one('INSERT INTO userdata(email,password) VALUES ($1, $2)', [email.toLowerCase(),hash])
+      .then(function(data) {
+        res.status(200).send(`User  with email: ${email} has been created`);
+      })
+      .catch(function(error) {
+        res.json({error: error.message});
+      })
+  //  storage[counter]={
+  //   id:counter,
+  //   username: req.body.email,
+  //   password: req.body.password
+  // }
+  // counter += 1;
+
+  // console.log(storage);
+  });
+});
 app.listen(8080, function() { // Set app to listen for requests on port 3000
   console.log('Listening on port 8080!'); // Output message to indicate server is listening
 });
